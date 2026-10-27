@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:16
+    pull_policy: never
+    container_name: mcp-postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - type: bind
+        source: ./pgdata
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcp -d mcp"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mcp:
+    image: lmos-postgres-mcp:dev
+    pull_policy: never
+    build:
+      context: .
+      network: none
+    network_mode: host
+    stdin_open: true
+    volumes:
+      - type: bind
+        source: ./.env
+        target: /app/.env
+        read_only: true
+        bind:
+          create_host_path: false
