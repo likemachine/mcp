@@ -62,5 +62,10 @@ from schema_tools import register_schema_tools
 register_schema_tools(mcp)
 
 
+from query_tools import register_query_tools
+
+register_query_tools(mcp)
+
+
 if __name__ == "__main__":
     mcp.run()

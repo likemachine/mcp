@@ -183,3 +183,97 @@ Expected result for every check:
 ```text
 RESULT: PASS
 ```
+
+## Restricted SQL tools
+
+### `run_select_query`
+
+Executes a validated read-only SELECT against accessible ordinary tables
+in the `public` schema.
+
+Example input:
+
+```json
+{
+  "sql": "SELECT id, name FROM clients ORDER BY id LIMIT 3"
+}
+```
+
+The response contains:
+
+- `columns`: ordered column names; duplicate names are preserved.
+- `rows`: arrays of values in column order.
+- `row_count`: number of returned rows.
+- `execution_time_ms`: elapsed request time, including connection and checks.
+
+PostgreSQL decimal values are serialized as strings to preserve precision.
+
+### `explain_query`
+
+Accepts the same supported SELECT syntax and returns an estimated plan using
+`EXPLAIN (FORMAT JSON, ANALYZE FALSE)`.
+
+Example input:
+
+```json
+{
+  "sql": "SELECT id FROM orders WHERE client_id = 1"
+}
+```
+
+The response contains `plan`, `estimated_cost`, `estimated_rows` and
+`planning_request_time_ms`.
+
+Cost values are PostgreSQL planner units, not milliseconds.
+The original query is planned without the result limit added by
+`run_select_query`.
+
+### Validation and execution limits
+
+- Exactly one SELECT statement, optionally with non-recursive SELECT CTEs.
+- Maximum input length: 4000 characters.
+- Maximum returned rows: 100, enforced by an outer LIMIT.
+- Statement timeout: 5 seconds per SQL statement, not per entire tool call.
+- Read-only database transactions.
+- Physical table references are qualified with the `public` schema.
+- Execution search path is restricted to `pg_catalog`.
+- Unknown AST constructs and functions outside the supported set are rejected.
+- DML, DDL, SELECT INTO, row locks and explicit system-catalog access are rejected.
+
+The current supported subset does not include UNION, window functions,
+explicit casts, recursive CTEs, arbitrary functions or views.
+
+### Security scope
+
+This implementation targets a controlled demonstration database.
+It is not a general-purpose sandbox for arbitrary PostgreSQL environments.
+
+The row limit does not limit the size of an individual value.
+The timeout does not impose a total wall-clock deadline on the entire tool.
+The security check verifies selected role, schema and table privileges,
+including the absence of RLS on readable demo tables; it is not an exhaustive
+audit of all PostgreSQL objects or role memberships.
+
+### Stage 3 checks
+
+Run unit tests:
+
+```bash
+python -m pytest tests/ -q
+```
+
+Run database and MCP checks:
+
+```bash
+python check_query.py
+python check_query_mcp.py
+python check_explain.py
+python check_runtime.py
+python check_security.py
+```
+
+Each check must finish with `RESULT: PASS`.
+
+`check_runtime.py` intentionally calls `pg_sleep` directly through the
+connection helper to verify server-side cancellation. User SQL tools reject
+`pg_sleep`.
