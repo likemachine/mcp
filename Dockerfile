@@ -16,6 +16,8 @@ RUN python -m pip install \
     -r /app/requirements-docker.txt \
     && rm -rf /wheelhouse
 
-COPY server.py check_mcp.py /app/
+COPY server.py db.py schema_tools.py /app/
+COPY check_mcp.py check_schema.py check_describe.py check_stats.py /app/
+COPY tests/ /app/tests/
 
 CMD ["python", "server.py"]

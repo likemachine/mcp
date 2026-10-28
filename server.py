@@ -1,13 +1,10 @@
 import logging
-from pathlib import Path
 
 import psycopg
-from dotenv import dotenv_values
 from fastmcp import FastMCP
-from psycopg.rows import dict_row
 
-BASE_DIR = Path(__file__).resolve().parent
-config = dotenv_values(BASE_DIR / ".env")
+from db import DatabaseConfigError, get_connection
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("postgres_mcp")
@@ -16,22 +13,8 @@ mcp = FastMCP("PostgreSQL MCP Server")
 
 
 def read_db_health() -> dict:
-    required = ("PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD")
-    if any(config.get(key) is None for key in required):
-        return {"status": "error", "error": "Database configuration is incomplete"}
-
     try:
-        with psycopg.connect(
-            host=config["PGHOST"],
-            port=int(config["PGPORT"]),
-            dbname=config["PGDATABASE"],
-            user=config["PGUSER"],
-            password=config["PGPASSWORD"],
-            connect_timeout=5,
-            options="-c statement_timeout=5000",
-            row_factory=dict_row,
-        ) as conn:
-            conn.read_only = True
+        with get_connection() as conn:
             row = conn.execute("""
                 SELECT
                     current_database() AS database,
@@ -49,10 +32,18 @@ def read_db_health() -> dict:
         row["server_time"] = row["server_time"].isoformat()
         row["read_only"] = row["read_only"] == "on"
         row["status"] = "ok"
+
         logger.info("get_db_health succeeded")
         return row
 
-    except (psycopg.Error, ValueError):
+    except DatabaseConfigError:
+        logger.error("Database configuration is invalid")
+        return {
+            "status": "error",
+            "error": "Database configuration is incomplete or invalid",
+        }
+
+    except psycopg.Error:
         logger.error("get_db_health failed")
         return {
             "status": "error",
@@ -64,6 +55,11 @@ def read_db_health() -> dict:
 def get_db_health() -> dict:
     """Return PostgreSQL connectivity, version and transaction read-only status."""
     return read_db_health()
+
+
+from schema_tools import register_schema_tools
+
+register_schema_tools(mcp)
 
 
 if __name__ == "__main__":

@@ -96,3 +96,71 @@ Do not commit:
 - pgdata/
 - wheelhouse/
 - backups/
+
+## Schema tools
+
+The server exposes three read-only PostgreSQL schema tools. All tools accept
+only the `public` schema, pass identifiers as SQL parameters, and return
+structured JSON.
+
+### list_tables
+
+Returns readable tables in the `public` schema.
+
+```json
+{
+  "schema": "public",
+  "tables": ["clients", "orders", "products"]
+}
+
+describe_table
+Returns columns, primary key columns and foreign keys for one table.
+{
+  "schema": "public",
+  "table": "orders",
+  "columns": [
+    {"name": "id", "type": "bigint", "nullable": false},
+    {"name": "client_id", "type": "bigint", "nullable": false}
+  ],
+  "primary_key": ["id"],
+  "foreign_keys": [
+    {
+      "column": "client_id",
+      "references": "clients.id"
+    }
+  ]
+}
+
+get_table_stats
+Returns approximate row count, total table size, index names and analyze
+timestamps. It does not execute  COUNT(*)  or  ANALYZE ; it reads existing
+PostgreSQL metadata and cumulative statistics.
+{
+  "schema": "public",
+  "table": "orders",
+  "estimated_rows": 200,
+  "size": "96 kB",
+  "last_analyze": "2026-10-28T11:24:19.868775+00:00",
+  "last_autoanalyze": "2026-10-28T11:24:37.330960+00:00",
+  "indexes": [
+    "orders_pkey",
+    "idx_orders_client_id",
+    "idx_orders_created_at"
+  ]
+}
+
+ estimated_rows  is PostgreSQL’s planner estimate and may be  null  before
+statistics have been collected.  last_analyze  reports the latest manual
+ ANALYZE ;  last_autoanalyze  reports the latest automatic analyze.
+Checks
+Run all unit tests:
+python -m pytest tests/ -q
+
+Run MCP integration checks against the configured PostgreSQL database:
+python check_mcp.py
+python check_describe.py
+python check_stats.py
+
+Expected result for every check:
+RESULT: PASS
+
