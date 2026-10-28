@@ -103,7 +103,7 @@ The server exposes three read-only PostgreSQL schema tools. All tools accept
 only the `public` schema, pass identifiers as SQL parameters, and return
 structured JSON.
 
-### list_tables
+### `list_tables`
 
 Returns readable tables in the `public` schema.
 
@@ -112,9 +112,13 @@ Returns readable tables in the `public` schema.
   "schema": "public",
   "tables": ["clients", "orders", "products"]
 }
+```
 
-describe_table
+### `describe_table`
+
 Returns columns, primary key columns and foreign keys for one table.
+
+```json
 {
   "schema": "public",
   "table": "orders",
@@ -130,11 +134,15 @@ Returns columns, primary key columns and foreign keys for one table.
     }
   ]
 }
+```
 
-get_table_stats
+### `get_table_stats`
+
 Returns approximate row count, total table size, index names and analyze
-timestamps. It does not execute  COUNT(*)  or  ANALYZE ; it reads existing
+timestamps. It does not execute `COUNT(*)` or `ANALYZE`; it reads existing
 PostgreSQL metadata and cumulative statistics.
+
+```json
 {
   "schema": "public",
   "table": "orders",
@@ -148,19 +156,30 @@ PostgreSQL metadata and cumulative statistics.
     "idx_orders_created_at"
   ]
 }
+```
 
- estimated_rows  is PostgreSQL’s planner estimate and may be  null  before
-statistics have been collected.  last_analyze  reports the latest manual
- ANALYZE ;  last_autoanalyze  reports the latest automatic analyze.
-Checks
+`estimated_rows` is PostgreSQL's planner estimate and may be `null` before
+statistics have been collected. `last_analyze` reports the latest manual
+`ANALYZE`; `last_autoanalyze` reports the latest automatic analyze.
+
+## Checks
+
 Run all unit tests:
+
+```bash
 python -m pytest tests/ -q
+```
 
 Run MCP integration checks against the configured PostgreSQL database:
+
+```bash
 python check_mcp.py
 python check_describe.py
 python check_stats.py
+```
 
 Expected result for every check:
-RESULT: PASS
 
+```text
+RESULT: PASS
+```
