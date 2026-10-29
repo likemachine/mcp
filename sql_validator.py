@@ -28,6 +28,7 @@ Is In Between Like ILike
 Add Sub Mul Div Mod Neg
 Case If
 Count Sum Avg Min Max Abs Round Lower Upper Coalesce
+Extract Var DateTrunc TimestampTrunc Floor Ceil Length Concat DPipe
 """.split())
 
 
