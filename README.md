@@ -1,122 +1,115 @@
-# PostgreSQL MCP Server for LMOS
+# PostgreSQL MCP Server
 
-Python/FastMCP server for controlled access to PostgreSQL
-from an LMOS multi-agent system.
+Самостоятельный MCP-сервер на Python/FastMCP для контролируемого доступа к PostgreSQL в режиме «только чтение». Сервер не зависит от конкретного агента: к нему может подключаться любой MCP-совместимый клиент. В качестве примера клиента используется Kotlin/ARC-агент [postgres-analyst](https://github.com/likemachine/postgres-mcp-agent), который через этот сервер отвечает на вопросы о схеме и данных БД.
 
-## Current status
+## Текущий статус
 
-Implemented:
-- MCP tool: get_db_health.
-- PostgreSQL connectivity through psycopg.
-- Configuration through a local .env file.
-- Dedicated database role: mcp_readonly.
-- Read-only health-check transaction.
-- Docker image with dependencies installed from local wheels.
-- Docker Compose configuration.
-- In-process MCP client smoke test inside a container.
+Реализовано:
+- Инструменты MCP: `get_db_health`, `list_tables`, `describe_table`, `get_table_stats`, `run_select_query`, `explain_query`.
+- Подключение к PostgreSQL через psycopg.
+- Конфигурация через локальный файл `.env`.
+- Отдельная роль БД `mcp_readonly` без прав на запись.
+- Валидатор SQL: допускаются только `SELECT` и `WITH ... SELECT`.
+- Структурированные ответы с кодами ошибок.
+- Docker-образ с зависимостями из локальных wheel-файлов и конфигурация Docker Compose.
+- Запуск по транспорту SSE для внешних агентов.
+- Автотесты и интеграционные проверки.
 
-Not implemented yet:
-- Schema inspection tools.
-- User-provided SQL execution and validation.
-- LMOS integration.
-- Automated database initialization for a clean installation.
-- Full automated test suite.
+Пока не реализовано:
+- Автоматическая инициализация БД для чистой установки.
+- Аутентификация на уровне MCP-транспорта (сервер слушает только `127.0.0.1`).
+- Полный набор автоматических тестов.
 
-## Current deployment
+## Текущее развёртывание
 
-The current configuration targets an Ubuntu Linux server.
+Конфигурация рассчитана на сервер под управлением Ubuntu Linux.
 
 PostgreSQL:
-- Image: postgres:16.
-- Database: mcp.
-- MCP connection role: mcp_readonly.
-- Data directory: ./pgdata.
-- Published address: 127.0.0.1:5432.
+- Образ: `postgres:16`.
+- База данных: `mcp`.
+- Роль для подключения MCP: `mcp_readonly`.
+- Каталог данных: `./pgdata`.
+- Опубликованный адрес: `127.0.0.1:5432`.
 
-The Compose file expects an already initialized PostgreSQL data directory.
-It is not yet a complete clean-install deployment.
+Compose-файл рассчитан на уже инициализированный каталог данных PostgreSQL, то есть это ещё не полноценное развёртывание «с нуля».
 
-The MCP service currently uses host networking and STDIO transport.
-No HTTP endpoint is exposed.
+Сервис MCP в Docker Compose использует host networking и транспорт STDIO, HTTP-порт не публикуется. Этот вариант применяется для smoke-тестов. Для подключения внешнего агента сервер запускается как отдельный процесс (см. следующий раздел).
 
-## Configuration
+## Запуск для агента (SSE)
 
-Create .env using .env.example as a template.
+```bash
+set -a; . ./.env; set +a
+nohup ./.venv/bin/fastmcp run server.py --transport sse --host 127.0.0.1 --port 5050 >> mcp-run.log 2>&1 &
+```
 
-The configured database and role must already exist.
-Do not commit .env or real credentials.
+Агент подключается к `127.0.0.1:5050`. Порт доступен только локально; при необходимости удалённого доступа используйте SSH-туннель, а не публикацию порта наружу.
 
-## Build
+## Конфигурация
 
-Prerequisites:
-- Docker Engine and Docker Compose.
-- Local image: python:3.11-slim-bookworm.
-- Local image: postgres:16.
-- Compatible dependency wheels in ./wheelhouse.
+Создайте `.env` по образцу `.env.example`.
 
-Build the application image:
+Указанные в нём база данных и роль должны уже существовать. Не коммитьте `.env` и реальные пароли.
+
+## Сборка
+
+Требования:
+- Docker Engine и Docker Compose.
+- Локальный образ `python:3.11-slim-bookworm`.
+- Локальный образ `postgres:16`.
+- Совместимые wheel-файлы зависимостей в `./wheelhouse`.
+
+Сборка образа приложения:
 
     docker build --pull=false --network=none -t lmos-postgres-mcp:dev .
 
-## Run PostgreSQL
+## Запуск PostgreSQL
 
     docker compose up -d --wait --wait-timeout 60 postgres
 
-Do not start another PostgreSQL container against the same data directory.
+Не запускайте второй контейнер PostgreSQL с тем же каталогом данных.
 
-## MCP smoke test
+## Smoke-тест MCP
 
     docker compose run --rm --no-deps mcp python check_mcp.py
 
-Expected:
-- Tool list contains get_db_health.
-- database is mcp.
-- db_user is mcp_readonly.
-- read_only is true.
-- status is ok.
+Ожидаемый результат:
+- В списке инструментов есть `get_db_health`.
+- `database` равна `mcp`.
+- `db_user` равен `mcp_readonly`.
+- `read_only` равно `true`.
+- `status` равен `ok`.
 
-This test uses an in-process MCP client and server.
-It does not verify a separate STDIO subprocess or LMOS integration.
+Тест использует клиент и сервер MCP внутри одного процесса. Он не проверяет отдельный STDIO-подпроцесс или подключение внешнего агента.
 
-## Security status
+## Безопасность
 
-Verified using a disposable test table:
-- SELECT succeeds.
-- INSERT, UPDATE and DELETE are denied for mcp_readonly.
-- CREATE privilege on schema public is absent.
+Проверено на временной тестовой таблице:
+- `SELECT` выполняется.
+- `INSERT`, `UPDATE` и `DELETE` запрещены для `mcp_readonly`.
+- Права `CREATE` на схему `public` нет.
 
-This is not a complete security audit.
-SQL validation and additional restrictions are planned.
+Защита построена в два независимых слоя: валидатор SQL в сервере и права роли в самой БД. Это не полный аудит безопасности.
 
-## Repository exclusions
+## Схемные инструменты
 
-Do not commit:
-- .env
-- .venv/
-- pgdata/
-- wheelhouse/
-- backups/
-
-## Schema tools
-
-The server exposes three read-only PostgreSQL schema tools. All tools accept
-only the `public` schema, pass identifiers as SQL parameters, and return
-structured JSON.
+Сервер предоставляет три инструмента для чтения схемы PostgreSQL. Все они принимают только схему `public`, передают идентификаторы как параметры SQL и возвращают структурированный JSON.
 
 ### `list_tables`
 
-Returns readable tables in the `public` schema.
+Возвращает доступные таблицы схемы `public` с оценкой числа строк и размером.
 
 ```json
 {
-  "schema": "public",
-  "tables": ["clients", "orders", "products"]
+  "tables": [
+    {"name": "clients", "rows_estimate": 20, "size": "48 kB"},
+    {"name": "orders", "rows_estimate": 200, "size": "96 kB"}
+  ]
 }
 ```
 
 ### `describe_table`
 
-Returns columns, primary key columns and foreign keys for one table.
+Возвращает столбцы, столбцы первичного ключа и внешние ключи одной таблицы.
 
 ```json
 {
@@ -138,9 +131,7 @@ Returns columns, primary key columns and foreign keys for one table.
 
 ### `get_table_stats`
 
-Returns approximate row count, total table size, index names and analyze
-timestamps. It does not execute `COUNT(*)` or `ANALYZE`; it reads existing
-PostgreSQL metadata and cumulative statistics.
+Возвращает приблизительное число строк, общий размер таблицы, имена индексов и время анализа. Инструмент не выполняет `COUNT(*)` и `ANALYZE`: он читает существующие метаданные и накопительную статистику PostgreSQL.
 
 ```json
 {
@@ -158,40 +149,19 @@ PostgreSQL metadata and cumulative statistics.
 }
 ```
 
-`estimated_rows` is PostgreSQL's planner estimate and may be `null` before
-statistics have been collected. `last_analyze` reports the latest manual
-`ANALYZE`; `last_autoanalyze` reports the latest automatic analyze.
+`estimated_rows` — оценка планировщика PostgreSQL, до сбора статистики может быть `null`. `last_analyze` показывает время последнего ручного `ANALYZE`, а `last_autoanalyze` — последнего автоматического.
 
-## Checks
+### `get_db_health`
 
-Run all unit tests:
+Возвращает состояние подключения: имя базы, пользователя, версию PostgreSQL, число активных подключений, время сервера, признак `read_only` и статус.
 
-```bash
-python -m pytest tests/ -q
-```
-
-Run MCP integration checks against the configured PostgreSQL database:
-
-```bash
-python check_mcp.py
-python check_describe.py
-python check_stats.py
-```
-
-Expected result for every check:
-
-```text
-RESULT: PASS
-```
-
-## Restricted SQL tools
+## Ограниченные SQL-инструменты
 
 ### `run_select_query`
 
-Executes a validated read-only SELECT against accessible ordinary tables
-in the `public` schema.
+Выполняет проверенный `SELECT` только для чтения по доступным обычным таблицам схемы `public`.
 
-Example input:
+Пример входных данных:
 
 ```json
 {
@@ -199,21 +169,20 @@ Example input:
 }
 ```
 
-The response contains:
+Ответ содержит:
 
-- `columns`: ordered column names; duplicate names are preserved.
-- `rows`: arrays of values in column order.
-- `row_count`: number of returned rows.
-- `execution_time_ms`: elapsed request time, including connection and checks.
+- `columns`: имена столбцов по порядку, дубликаты сохраняются.
+- `rows`: массивы значений в порядке столбцов.
+- `row_count`: число возвращённых строк.
+- `execution_time_ms`: время выполнения запроса, включая подключение и проверки.
 
-PostgreSQL decimal values are serialized as strings to preserve precision.
+Десятичные значения PostgreSQL сериализуются как строки для сохранения точности.
 
 ### `explain_query`
 
-Accepts the same supported SELECT syntax and returns an estimated plan using
-`EXPLAIN (FORMAT JSON, ANALYZE FALSE)`.
+Принимает тот же поддерживаемый синтаксис `SELECT` и возвращает оценочный план через `EXPLAIN (FORMAT JSON, ANALYZE FALSE)`.
 
-Example input:
+Пример входных данных:
 
 ```json
 {
@@ -221,50 +190,61 @@ Example input:
 }
 ```
 
-The response contains `plan`, `estimated_cost`, `estimated_rows` and
-`planning_request_time_ms`.
+Ответ содержит `plan`, `estimated_cost`, `estimated_rows` и `planning_request_time_ms`.
 
-Cost values are PostgreSQL planner units, not milliseconds.
-The original query is planned without the result limit added by
-`run_select_query`.
+Стоимость измеряется в условных единицах планировщика PostgreSQL, а не в миллисекундах. Исходный запрос планируется без ограничения числа строк, которое `run_select_query` добавляет к результату.
 
-### Validation and execution limits
+### Проверка и ограничения выполнения
 
-- Exactly one SELECT statement, optionally with non-recursive SELECT CTEs.
-- Maximum input length: 4000 characters.
-- Maximum returned rows: 100, enforced by an outer LIMIT.
-- Statement timeout: 5 seconds per SQL statement, not per entire tool call.
-- Read-only database transactions.
-- Physical table references are qualified with the `public` schema.
-- Execution search path is restricted to `pg_catalog`.
-- Unknown AST constructs and functions outside the supported set are rejected.
-- DML, DDL, SELECT INTO, row locks and explicit system-catalog access are rejected.
+- Ровно один оператор `SELECT`, допускаются нерекурсивные CTE на основе `SELECT`.
+- Максимальная длина входного SQL: 4000 символов.
+- Максимум возвращаемых строк: 100, ограничение накладывается внешним `LIMIT`.
+- Таймаут запроса: 5 секунд на один SQL-оператор, а не на весь вызов инструмента.
+- Транзакции базы данных только для чтения.
+- Ссылки на физические таблицы квалифицируются схемой `public`.
+- Путь поиска при выполнении ограничен `pg_catalog`.
+- Неизвестные конструкции синтаксического дерева и функции вне поддерживаемого набора отклоняются.
+- DML, DDL, `SELECT INTO`, блокировки строк и явное обращение к системному каталогу отклоняются.
 
-The current supported subset does not include UNION, window functions,
-explicit casts, recursive CTEs, arbitrary functions or views.
+Поддерживаются, в частности, `JOIN`, `GROUP BY`, `ORDER BY`, агрегаты `COUNT` и `SUM` и функция `EXTRACT(field FROM expression)`.
 
-### Security scope
+Текущее подмножество не включает `UNION`, оконные функции, явные приведения типов, рекурсивные CTE, произвольные функции и представления.
 
-This implementation targets a controlled demonstration database.
-It is not a general-purpose sandbox for arbitrary PostgreSQL environments.
+### Ответы с ошибками
 
-The row limit does not limit the size of an individual value.
-The timeout does not impose a total wall-clock deadline on the entire tool.
-The security check verifies selected role, schema and table privileges,
-including the absence of RLS on readable demo tables; it is not an exhaustive
-audit of all PostgreSQL objects or role memberships.
+Ошибки инструментов возвращаются как структурированный JSON:
 
-### Stage 3 checks
+```json
+{"status": "error", "error": {"code": "SELECT_ONLY", "message": "Only SELECT or WITH ... SELECT is allowed"}}
+```
 
-Run unit tests:
+Коды ошибок:
+- `SELECT_ONLY` — оператор не является `SELECT` или `WITH ... SELECT`.
+- `TABLE_NOT_ALLOWED` — запрос ссылается на таблицу, которой нет или к которой нет доступа.
+- `TABLE_NOT_FOUND` — запрос `describe_table` или `get_table_stats` к несуществующей таблице.
+- `UNSUPPORTED_SQL` — конструкция SQL вне поддерживаемого подмножества.
+- `QUERY_ERROR` — PostgreSQL отклонил запрос (например, неизвестный столбец, синтаксическая ошибка, деление на ноль). Сообщение усечено до 200 символов.
+
+### Границы безопасности
+
+Реализация рассчитана на контролируемую демонстрационную базу данных и не является универсальной песочницей для произвольных окружений PostgreSQL.
+
+Ограничение на число строк не ограничивает размер отдельного значения. Таймаут не задаёт общий предел времени для всего вызова. Проверка безопасности контролирует выбранную роль, права на схему и таблицы, в том числе отсутствие RLS на читаемых демонстрационных таблицах, но не является исчерпывающим аудитом всех объектов PostgreSQL и членства ролей.
+
+## Проверки
+
+Запуск всех модульных тестов:
 
 ```bash
 python -m pytest tests/ -q
 ```
 
-Run database and MCP checks:
+Интеграционные проверки MCP на настроенной базе данных:
 
 ```bash
+python check_mcp.py
+python check_describe.py
+python check_stats.py
 python check_query.py
 python check_query_mcp.py
 python check_explain.py
@@ -272,8 +252,11 @@ python check_runtime.py
 python check_security.py
 ```
 
-Each check must finish with `RESULT: PASS`.
+Каждая проверка должна завершаться строкой:
 
-`check_runtime.py` intentionally calls `pg_sleep` directly through the
-connection helper to verify server-side cancellation. User SQL tools reject
-`pg_sleep`.
+```text
+RESULT: PASS
+```
+
+`check_runtime.py` намеренно вызывает `pg_sleep` напрямую через вспомогательную функцию подключения, чтобы проверить отмену запроса на стороне сервера. Пользовательские SQL-инструменты `pg_sleep` отклоняют.
+
