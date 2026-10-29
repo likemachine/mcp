@@ -155,6 +155,20 @@ def _read_query(sql: str, *, explain: bool = False) -> dict:
             "Query was canceled, possibly because the time limit was exceeded",
         )
 
+    except (
+        psycopg.errors.AmbiguousColumn,
+        psycopg.errors.UndefinedColumn,
+        psycopg.errors.UndefinedFunction,
+        psycopg.errors.SyntaxError,
+        psycopg.errors.DatatypeMismatch,
+        psycopg.errors.GroupingError,
+        psycopg.errors.DivisionByZero,
+        psycopg.errors.InvalidTextRepresentation,
+    ) as error:
+        detail = (error.diag.message_primary or 'Invalid query')[:200]
+        logger.warning('run_select_query: query error: %s', detail)
+        return error_result('QUERY_ERROR', detail)
+
     except psycopg.Error:
         logger.error("run_select_query: database query failed")
         return error_result(
